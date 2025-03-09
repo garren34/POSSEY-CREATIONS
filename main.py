@@ -3,8 +3,7 @@ import sqlite3
 
 app = Flask(__name__)
 app.secret_key = 'mysecret123'
-
-users = {'POSSEY': 'Guns4Liberaltears'}  # Updated username and password
+users = {'POSSEY': 'Guns4Liberaltears'}
 
 def init_db():
     try:
@@ -20,6 +19,8 @@ def init_db():
     except Exception as e:
         print(f"Error initializing database: {e}")
         raise
+
+init_db() 
 
 @app.route('/')
 def home():
@@ -454,7 +455,5 @@ def delete_job():
     return redirect(url_for('home'))
 
 if __name__ == '__main__':
-    print("Starting application...")
-    init_db()
     print("Running Flask app on port 8080")
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    app.run(host='0.0.0.0', port=8080)
