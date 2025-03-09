@@ -43,6 +43,7 @@ def home():
     return f"""
     <html>
     <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
@@ -97,6 +98,7 @@ def staff():
     return f"""
     <html>
     <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
@@ -188,6 +190,7 @@ def add_job_details():
     return f"""
     <html>
     <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
@@ -244,6 +247,7 @@ def job_details():
     return f"""
     <html>
     <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
@@ -295,6 +299,7 @@ def job_times():
     return f"""
     <html>
     <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
@@ -339,6 +344,7 @@ def archive():
     return f"""
     <html>
     <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
@@ -371,6 +377,7 @@ def login():
     return """
     <html>
     <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; text-align: center; }}
             input[type="text"], input[type="password"] {{ padding: 5px; margin: 5px; }}
