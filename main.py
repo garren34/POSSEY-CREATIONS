@@ -1,4 +1,4 @@
-from flask import Flask, request, session, redirect, url_for
+from flask import Flask, request, session, redirect, url_for, send_file, send_from_directory
 import sqlite3
 
 app = Flask(__name__)
@@ -20,7 +20,16 @@ def init_db():
         print(f"Error initializing database: {e}")
         raise
 
-init_db() 
+init_db()
+
+# Serve static files (for PC.png and sw.js)
+@app.route('/static/<path:filename>')
+def static_files(filename):
+    return send_from_directory('static', filename)
+
+@app.route('/manifest.json')
+def manifest():
+    return send_from_directory('.', 'manifest.json')
 
 @app.route('/')
 def home():
@@ -43,7 +52,14 @@ def home():
     return f"""
     <html>
     <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="manifest" href="/manifest.json">
+        <script>
+          if ('serviceWorker' in navigator) {{
+            navigator.serviceWorker.register('/static/sw.js')
+              .then(() => console.log('Service Worker registered'));
+          }}
+        </script>
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
@@ -66,6 +82,8 @@ def home():
         <a href="/staff">Manage Staff</a>
         <a href="/archive">View Archive</a>
         <a href="/job_times">View Job Times</a>
+        <a href="/download_db">Download Database</a>
+        <a href="/upload_db">Upload Database</a>
         <form method="GET" action="/job_details">
             <input type="text" name="job_number" placeholder="Search Job Number" required>
             <input type="submit" value="Search">
@@ -98,7 +116,14 @@ def staff():
     return f"""
     <html>
     <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="manifest" href="/manifest.json">
+        <script>
+          if ('serviceWorker' in navigator) {{
+            navigator.serviceWorker.register('/static/sw.js')
+              .then(() => console.log('Service Worker registered'));
+          }}
+        </script>
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
@@ -190,7 +215,14 @@ def add_job_details():
     return f"""
     <html>
     <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="manifest" href="/manifest.json">
+        <script>
+          if ('serviceWorker' in navigator) {{
+            navigator.serviceWorker.register('/static/sw.js')
+              .then(() => console.log('Service Worker registered'));
+          }}
+        </script>
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
@@ -247,7 +279,14 @@ def job_details():
     return f"""
     <html>
     <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="manifest" href="/manifest.json">
+        <script>
+          if ('serviceWorker' in navigator) {{
+            navigator.serviceWorker.register('/static/sw.js')
+              .then(() => console.log('Service Worker registered'));
+          }}
+        </script>
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
@@ -299,7 +338,14 @@ def job_times():
     return f"""
     <html>
     <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="manifest" href="/manifest.json">
+        <script>
+          if ('serviceWorker' in navigator) {{
+            navigator.serviceWorker.register('/static/sw.js')
+              .then(() => console.log('Service Worker registered'));
+          }}
+        </script>
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
@@ -344,7 +390,14 @@ def archive():
     return f"""
     <html>
     <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="manifest" href="/manifest.json">
+        <script>
+          if ('serviceWorker' in navigator) {{
+            navigator.serviceWorker.register('/static/sw.js')
+              .then(() => console.log('Service Worker registered'));
+          }}
+        </script>
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
@@ -377,7 +430,14 @@ def login():
     return """
     <html>
     <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="manifest" href="/manifest.json">
+        <script>
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/sw.js')
+              .then(() => console.log('Service Worker registered'));
+          }
+        </script>
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; text-align: center; }}
             input[type="text"], input[type="password"] {{ padding: 5px; margin: 5px; }}
@@ -460,6 +520,51 @@ def delete_job():
     elif 'archive' in referrer:
         return redirect(url_for('archive'))
     return redirect(url_for('home'))
+
+# Download database route
+@app.route('/download_db')
+def download_db():
+    if 'logged_in' not in session:
+        return redirect(url_for('login'))
+    return send_file('tracker.db', as_attachment=True, download_name='tracker.db')
+
+# Upload database route
+@app.route('/upload_db', methods=['GET', 'POST'])
+def upload_db():
+    if 'logged_in' not in session:
+        return redirect(url_for('login'))
+    if request.method == 'POST':
+        file = request.files['db_file']
+        if file and file.filename.endswith('.db'):
+            file.save('tracker.db')
+            return redirect(url_for('home'))
+        return "Invalid file. <a href='/upload_db'>Try again</a>"
+    return """
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="manifest" href="/manifest.json">
+        <script>
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/sw.js')
+              .then(() => console.log('Service Worker registered'));
+          }
+        </script>
+        <style>
+            body {{ font-family: Arial, sans-serif; padding: 20px; text-align: center; }}
+            input[type="submit"] {{ background-color: #3498db; color: white; padding: 8px; border: none; border-radius: 5px; }}
+        </style>
+    </head>
+    <body>
+        <h1>Upload Database</h1>
+        <form method="POST" enctype="multipart/form-data">
+            <input type="file" name="db_file" accept=".db">
+            <input type="submit" value="Upload">
+        </form>
+        <a href="/">Back</a>
+    </body>
+    </html>
+    """
 
 if __name__ == '__main__':
     print("Running Flask app on port 8080")
