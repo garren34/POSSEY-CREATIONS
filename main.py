@@ -74,16 +74,14 @@ def home():
             ul {{ list-style-type: none; padding: 0; }}
             li {{ margin: 5px 0; }}
             .logout {{ position: absolute; top: 20px; right: 20px; }}
+            .nav-buttons {{ margin: 10px 0; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }}
+            .nav-buttons button {{ background-color: #2c3e50; color: white; padding: 8px 16px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; }}
+            .nav-buttons button:hover {{ background-color: #34495e; }}
         </style>
     </head>
     <body>
         <h1>Production Tracker</h1>
         <a href="/logout" class="logout">Logout</a>
-        <a href="/staff">Manage Staff</a>
-        <a href="/archive">View Archive</a>
-        <a href="/job_times">View Job Times</a>
-        <a href="/download_db">Download Database</a>
-        <a href="/upload_db">Upload Database</a>
         <form method="GET" action="/job_details">
             <input type="text" name="job_number" placeholder="Search Job Number" required>
             <input type="submit" value="Search">
@@ -92,6 +90,13 @@ def home():
             <input type="text" name="job_number" placeholder="Enter Job Number" required>
             <input type="submit" value="Add Job">
         </form>
+        <div class="nav-buttons">
+            <button onclick="window.location.href='/staff'">Manage Staff</button>
+            <button onclick="window.location.href='/archive'">View Archive</button>
+            <button onclick="window.location.href='/job_times'">View Job Times</button>
+            <button onclick="window.location.href='/download_db'">Download Database</button>
+            <button onclick="window.location.href='/upload_db'">Upload Database</button>
+        </div>
         <h2>Active Jobs (Click to Add/Edit Details)</h2>
         <ul>{job_html}</ul>
     </body>
