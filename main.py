@@ -1,12 +1,10 @@
-from flask import Flask, request, session, redirect, url_for, send_file, send_from_directory
-import sqlite3
+from flask import Flask, request, session, redirect, url_for, send_from_directory
+from supabase import create_client, Client
+import os
 
 app = Flask(__name__)
 app.secret_key = 'mysecret123'
 users = {'POSSEY': 'Guns4Liberaltears'}
-
-from supabase import create_client, Client
-import os
 
 # Load Supabase credentials from environment variables
 SUPABASE_URL = os.getenv('SUPABASE_URL')
@@ -14,22 +12,6 @@ SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 
 # Initialize Supabase client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-def init_db():
-    try:
-        print("Initializing database...")
-        conn = sqlite3.connect('tracker.db')
-        c = conn.cursor()
-        c.execute('CREATE TABLE IF NOT EXISTS staff (name TEXT UNIQUE)')
-        c.execute('CREATE TABLE IF NOT EXISTS jobs (id INTEGER PRIMARY KEY, bay INTEGER, job_number TEXT UNIQUE, estimated_time INTEGER, actual_time INTEGER, issues TEXT, archived INTEGER DEFAULT 0)')
-        c.execute('CREATE TABLE IF NOT EXISTS job_staff (job_id INTEGER, staff_name TEXT, FOREIGN KEY(job_id) REFERENCES jobs(id))')
-        conn.commit()
-        conn.close()
-        print("Database initialized successfully")
-    except Exception as e:
-        print(f"Error initializing database: {e}")
-        raise
-
-init_db()
 
 # Serve static files (for PC.png and sw.js)
 @app.route('/static/<path:filename>')
@@ -44,20 +26,21 @@ def manifest():
 def home():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
-    conn = sqlite3.connect('tracker.db')
-    c = conn.cursor()
-    c.execute('SELECT id, job_number FROM jobs WHERE archived = 0 ORDER BY id')
-    jobs = c.fetchall()
-    conn.close()
+    
+    # Fetch active jobs from Supabase
+    response = supabase.table('jobs').select('id', 'job_number').eq('archived', 0).order('id').execute()
+    jobs = response.data  # Data is a list of dictionaries
+    
     job_html = ''
     for job in jobs:
-        job_html += f'<li><a href="/add_job_details?job_id={job[0]}">{job[1]}</a> ' \
+        job_html += f'<li><a href="/add_job_details?job_id={job["id"]}">{job["job_number"]}</a> ' \
                     f'<form method="POST" action="/archive_job" style="display:inline;">' \
-                    f'<input type="hidden" name="job_id" value="{job[0]}">' \
+                    f'<input type="hidden" name="job_id" value="{job["id"]}">' \
                     f'<input type="submit" value="Archive" class="archive-btn"></form> ' \
                     f'<form method="POST" action="/delete_job" style="display:inline;">' \
-                    f'<input type="hidden" name="job_id" value="{job[0]}">' \
+                    f'<input type="hidden" name="job_id" value="{job["id"]}">' \
                     f'<input type="submit" value="Delete" class="delete-btn"></form></li>'
+    
     return f"""
     <html>
     <head>
@@ -103,8 +86,6 @@ def home():
             <button onclick="window.location.href='/staff'">Manage Staff</button>
             <button onclick="window.location.href='/archive'">View Archive</button>
             <button onclick="window.location.href='/job_times'">View Job Times</button>
-            <button onclick="window.location.href='/download_db'">Download Database</button>
-            <button onclick="window.location.href='/upload_db'">Upload Database</button>
         </div>
         <h2>Active Jobs (Click to Add/Edit Details)</h2>
         <ul>{job_html}</ul>
@@ -116,17 +97,18 @@ def home():
 def staff():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
-    conn = sqlite3.connect('tracker.db')
-    c = conn.cursor()
-    c.execute('SELECT name FROM staff')
-    staff_list = [row[0] for row in c.fetchall()]
-    conn.close()
+    
+    # Fetch staff list from Supabase
+    response = supabase.table('staff').select('name').execute()
+    staff_list = [staff['name'] for staff in response.data]
+    
     staff_html = ''
     for staff in staff_list:
         staff_html += f'<li>{staff} ' \
                       f'<form method="POST" action="/delete_staff" style="display:inline;">' \
                       f'<input type="hidden" name="staff_name" value="{staff}">' \
                       f'<input type="submit" value="Remove" class="delete-btn"></form></li>'
+    
     return f"""
     <html>
     <head>
@@ -171,14 +153,17 @@ def add_job():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
     job_number = request.form['job_number']
-    conn = sqlite3.connect('tracker.db')
-    c = conn.cursor()
+    
     try:
-        c.execute('INSERT INTO jobs (job_number) VALUES (?)', (job_number,))
-        conn.commit()
-    except sqlite3.IntegrityError:
-        pass  # Job number already exists, just proceed
-    conn.close()
+        # Insert new job into Supabase
+        supabase.table('jobs').insert({'job_number': job_number}).execute()
+    except Exception as e:
+        # Handle duplicate job_number error
+        if 'duplicate key' in str(e):
+            pass  # Job number exists, proceed silently
+        else:
+            raise e
+    
     return redirect(url_for('home'))
 
 @app.route('/add_job_details', methods=['GET', 'POST'])
@@ -186,46 +171,55 @@ def add_job_details():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
     job_id = request.args.get('job_id')
-    conn = sqlite3.connect('tracker.db')
-    c = conn.cursor()
-    c.execute('SELECT job_number, bay, estimated_time, actual_time, issues FROM jobs WHERE id = ?', (job_id,))
-    job = c.fetchone()
-    c.execute('SELECT name FROM staff')
-    staff_list = [row[0] for row in c.fetchall()]
-    c.execute('SELECT staff_name FROM job_staff WHERE job_id = ?', (job_id,))
-    current_staff = [row[0] for row in c.fetchall()]
-    conn.close()
-
+    
+    # Fetch job details from Supabase
+    job_response = supabase.table('jobs').select('*').eq('id', job_id).execute()
+    job = job_response.data[0] if job_response.data else None
+    
+    # Fetch all staff
+    staff_response = supabase.table('staff').select('name').execute()
+    staff_list = [staff['name'] for staff in staff_response.data]
+    
+    # Fetch current staff for this job
+    current_staff_response = supabase.table('job_staff').select('staff_name').eq('job_id', job_id).execute()
+    current_staff = [staff['staff_name'] for staff in current_staff_response.data]
+    
     if not job:
         return "Job not found. <a href='/'>Back</a>"
-
-    job_number, bay, est_time, act_time, issues = job
-    bay = bay or ''
-    est_time = est_time or ''
-    act_time = act_time or ''
-    issues = issues or ''
-
+    
+    job_number = job['job_number']
+    bay = job['bay'] or ''
+    est_time = job['estimated_time'] or ''
+    act_time = job['actual_time'] or ''
+    issues = job['issues'] or ''
+    
     staff_options = ''.join(f'<input type="checkbox" name="staff" value="{staff}" {"checked" if staff in current_staff else ""}> {staff}<br>' 
                             for staff in staff_list)
-
+    
     if request.method == 'POST':
         bay = int(request.form['bay']) if request.form['bay'] else None
         est_time = int(request.form['estimated_time']) if request.form['estimated_time'] else None
         act_time = int(request.form['actual_time']) if request.form['actual_time'] else None
         issues = request.form['issues'] or 'None'
         staff_names = request.form.getlist('staff')
-
-        conn = sqlite3.connect('tracker.db')
-        c = conn.cursor()
-        c.execute('UPDATE jobs SET bay=?, estimated_time=?, actual_time=?, issues=? WHERE id=?',
-                  (bay, est_time, act_time, issues, job_id))
-        c.execute('DELETE FROM job_staff WHERE job_id = ?', (job_id,))
+        
+        # Update job details in Supabase
+        supabase.table('jobs').update({
+            'bay': bay,
+            'estimated_time': est_time,
+            'actual_time': act_time,
+            'issues': issues
+        }).eq('id', job_id).execute()
+        
+        # Delete existing staff assignments
+        supabase.table('job_staff').delete().eq('job_id', job_id).execute()
+        
+        # Insert new staff assignments
         for staff in staff_names:
-            c.execute('INSERT INTO job_staff (job_id, staff_name) VALUES (?, ?)', (job_id, staff))
-        conn.commit()
-        conn.close()
+            supabase.table('job_staff').insert({'job_id': job_id, 'staff_name': staff}).execute()
+        
         return redirect(url_for('home'))
-
+    
     return f"""
     <html>
     <head>
@@ -265,17 +259,25 @@ def job_details():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
     job_number = request.args.get('job_number')
-    conn = sqlite3.connect('tracker.db')
-    c = conn.cursor()
-    c.execute('SELECT id, bay, estimated_time, actual_time, issues, archived FROM jobs WHERE job_number = ?', (job_number,))
-    job = c.fetchone()
+    
+    # Fetch job details from Supabase
+    job_response = supabase.table('jobs').select('*').eq('job_number', job_number).execute()
+    job = job_response.data[0] if job_response.data else None
+    
     if not job:
         return "Job not found. <a href='/'>Back</a>"
-    job_id, bay, est_time, act_time, issues, archived = job
-    c.execute('SELECT staff_name FROM job_staff WHERE job_id = ?', (job_id,))
-    staff_list = [row[0] for row in c.fetchall()]
-    conn.close()
-
+    
+    job_id = job['id']
+    bay = job['bay']
+    est_time = job['estimated_time']
+    act_time = job['actual_time']
+    issues = job['issues']
+    archived = job['archived']
+    
+    # Fetch staff for this job
+    staff_response = supabase.table('job_staff').select('staff_name').eq('job_id', job_id).execute()
+    staff_list = [staff['staff_name'] for staff in staff_response.data]
+    
     if not staff_list:
         staff_html = "No staff assigned."
     else:
@@ -285,11 +287,11 @@ def job_details():
         for staff in staff_list:
             staff_html += f'<li>{staff}: {hours_per_staff:.2f} mins</li>'
         staff_html += '</ul>'
-
+    
     time_diff = act_time - est_time if est_time and act_time else 0
     diff_text = f"{time_diff} mins {'over' if time_diff > 0 else 'under'}" if time_diff != 0 else "on time"
     status = "Archived" if archived else "Active"
-
+    
     return f"""
     <html>
     <head>
@@ -331,24 +333,26 @@ def job_details():
 def job_times():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
-    conn = sqlite3.connect('tracker.db')
-    c = conn.cursor()
-    c.execute('SELECT id, bay, job_number, estimated_time, actual_time FROM jobs WHERE archived = 0')
-    jobs = c.fetchall()
+    
+    # Fetch active jobs from Supabase
+    jobs_response = supabase.table('jobs').select('id', 'bay', 'job_number', 'estimated_time', 'actual_time').eq('archived', 0).execute()
+    jobs = jobs_response.data
+    
     job_staff = {}
-    for job_id in [job[0] for job in jobs]:
-        c.execute('SELECT staff_name FROM job_staff WHERE job_id = ?', (job_id,))
-        job_staff[job_id] = [row[0] for row in c.fetchall()]
-    conn.close()
+    for job in jobs:
+        staff_response = supabase.table('job_staff').select('staff_name').eq('job_id', job['id']).execute()
+        job_staff[job['id']] = [staff['staff_name'] for staff in staff_response.data]
+    
     job_html = ''
     for job in jobs:
-        time_diff = job[4] - job[3] if job[3] and job[4] else 0
+        time_diff = job['actual_time'] - job['estimated_time'] if job['estimated_time'] and job['actual_time'] else 0
         diff_text = f" ({time_diff} mins {'over' if time_diff > 0 else 'under'})" if time_diff != 0 else " (on time)"
-        staff_names = ', '.join(job_staff.get(job[0], []))
-        job_html += f'<li>Staff: {staff_names} | Bay {job[1] or "Not set"}, Job #{job[2]}, Est. {job[3] or "Not set"} mins, Act. {job[4] or "Not set"} mins{diff_text} ' \
+        staff_names = ', '.join(job_staff.get(job['id'], []))
+        job_html += f'<li>Staff: {staff_names} | Bay {job["bay"] or "Not set"}, Job #{job["job_number"]}, Est. {job["estimated_time"] or "Not set"} mins, Act. {job["actual_time"] or "Not set"} mins{diff_text} ' \
                     f'<form method="POST" action="/delete_job" style="display:inline;">' \
-                    f'<input type="hidden" name="job_id" value="{job[0]}">' \
+                    f'<input type="hidden" name="job_id" value="{job["id"]}">' \
                     f'<input type="submit" value="Delete" class="delete-btn"></form></li>'
+    
     return f"""
     <html>
     <head>
@@ -383,24 +387,26 @@ def job_times():
 def archive():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
-    conn = sqlite3.connect('tracker.db')
-    c = conn.cursor()
-    c.execute('SELECT id, bay, job_number, estimated_time, actual_time, issues FROM jobs WHERE archived = 1')
-    jobs = c.fetchall()
+    
+    # Fetch archived jobs from Supabase
+    jobs_response = supabase.table('jobs').select('id', 'bay', 'job_number', 'estimated_time', 'actual_time', 'issues').eq('archived', 1).execute()
+    jobs = jobs_response.data
+    
     job_staff = {}
-    for job_id in [job[0] for job in jobs]:
-        c.execute('SELECT staff_name FROM job_staff WHERE job_id = ?', (job_id,))
-        job_staff[job_id] = [row[0] for row in c.fetchall()]
-    conn.close()
+    for job in jobs:
+        staff_response = supabase.table('job_staff').select('staff_name').eq('job_id', job['id']).execute()
+        job_staff[job['id']] = [staff['staff_name'] for staff in staff_response.data]
+    
     job_html = ''
     for job in jobs:
-        time_diff = job[4] - job[3] if job[3] and job[4] else 0
+        time_diff = job['actual_time'] - job['estimated_time'] if job['estimated_time'] and job['actual_time'] else 0
         diff_text = f" ({time_diff} mins {'over' if time_diff > 0 else 'under'})" if time_diff != 0 else " (on time)"
-        staff_names = ', '.join(job_staff.get(job[0], []))
-        job_html += f'<li>Staff: {staff_names} | Bay {job[1] or "Not set"}, Job #{job[2]}, Est. {job[3] or "Not set"} mins, Act. {job[4] or "Not set"} mins{diff_text}, Issues: {job[5]} ' \
+        staff_names = ', '.join(job_staff.get(job['id'], []))
+        job_html += f'<li>Staff: {staff_names} | Bay {job["bay"] or "Not set"}, Job #{job["job_number"]}, Est. {job["estimated_time"] or "Not set"} mins, Act. {job["actual_time"] or "Not set"} mins{diff_text}, Issues: {job["issues"]} ' \
                     f'<form method="POST" action="/delete_job" style="display:inline;">' \
-                    f'<input type="hidden" name="job_id" value="{job[0]}">' \
+                    f'<input type="hidden" name="job_id" value="{job["id"]}">' \
                     f'<input type="submit" value="Delete" class="delete-btn"></form></li>'
+    
     return f"""
     <html>
     <head>
@@ -480,14 +486,17 @@ def add_staff():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
     name = request.form['staff_name']
-    conn = sqlite3.connect('tracker.db')
-    c = conn.cursor()
+    
     try:
-        c.execute('INSERT INTO staff (name) VALUES (?)', (name,))
-        conn.commit()
-    except sqlite3.IntegrityError:
-        pass
-    conn.close()
+        # Insert new staff into Supabase
+        supabase.table('staff').insert({'name': name}).execute()
+    except Exception as e:
+        # Handle duplicate staff name error
+        if 'duplicate key' in str(e):
+            pass  # Staff name exists, proceed silently
+        else:
+            raise e
+    
     return redirect(url_for('staff'))
 
 @app.route('/delete_staff', methods=['POST'])
@@ -495,14 +504,16 @@ def delete_staff():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
     staff_name = request.form['staff_name']
-    conn = sqlite3.connect('tracker.db')
-    c = conn.cursor()
-    c.execute('SELECT COUNT(*) FROM job_staff WHERE staff_name = ?', (staff_name,))
-    job_count = c.fetchone()[0]
-    if job_count == 0:
-        c.execute('DELETE FROM staff WHERE name = ?', (staff_name,))
-        conn.commit()
-    conn.close()
+    
+    # Check if staff is assigned to any jobs
+    job_staff_response = supabase.table('job_staff').select('job_id').eq('staff_name', staff_name).execute()
+    if job_staff_response.data:
+        # Staff is assigned to jobs, do not delete
+        pass
+    else:
+        # Delete staff from Supabase
+        supabase.table('staff').delete().eq('name', staff_name).execute()
+    
     return redirect(url_for('staff'))
 
 @app.route('/archive_job', methods=['POST'])
@@ -510,11 +521,10 @@ def archive_job():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
     job_id = request.form['job_id']
-    conn = sqlite3.connect('tracker.db')
-    c = conn.cursor()
-    c.execute('UPDATE jobs SET archived = 1 WHERE id = ?', (job_id,))
-    conn.commit()
-    conn.close()
+    
+    # Archive job in Supabase
+    supabase.table('jobs').update({'archived': 1}).eq('id', job_id).execute()
+    
     return redirect(url_for('home'))
 
 @app.route('/delete_job', methods=['POST'])
@@ -522,63 +532,19 @@ def delete_job():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
     job_id = request.form['job_id']
-    conn = sqlite3.connect('tracker.db')
-    c = conn.cursor()
-    c.execute('DELETE FROM job_staff WHERE job_id = ?', (job_id,))
-    c.execute('DELETE FROM jobs WHERE id = ?', (job_id,))
-    conn.commit()
-    conn.close()
+    
+    # Delete job staff assignments
+    supabase.table('job_staff').delete().eq('job_id', job_id).execute()
+    
+    # Delete job from Supabase
+    supabase.table('jobs').delete().eq('id', job_id).execute()
+    
     referrer = request.referrer or url_for('home')
     if 'job_times' in referrer:
         return redirect(url_for('job_times'))
     elif 'archive' in referrer:
         return redirect(url_for('archive'))
     return redirect(url_for('home'))
-
-# Download database route
-@app.route('/download_db')
-def download_db():
-    if 'logged_in' not in session:
-        return redirect(url_for('login'))
-    return send_file('tracker.db', as_attachment=True, download_name='tracker.db')
-
-# Upload database route
-@app.route('/upload_db', methods=['GET', 'POST'])
-def upload_db():
-    if 'logged_in' not in session:
-        return redirect(url_for('login'))
-    if request.method == 'POST':
-        file = request.files['db_file']
-        if file and file.filename.endswith('.db'):
-            file.save('tracker.db')
-            return redirect(url_for('home'))
-        return "Invalid file. <a href='/upload_db'>Try again</a>"
-    return """
-    <html>
-    <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link rel="manifest" href="/manifest.json">
-        <script>
-          if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/static/sw.js')
-              .then(() => console.log('Service Worker registered'));
-          }
-        </script>
-        <style>
-            body {{ font-family: Arial, sans-serif; padding: 20px; text-align: center; }}
-            input[type="submit"] {{ background-color: #3498db; color: white; padding: 8px; border: none; border-radius: 5px; }}
-        </style>
-    </head>
-    <body>
-        <h1>Upload Database</h1>
-        <form method="POST" enctype="multipart/form-data">
-            <input type="file" name="db_file" accept=".db">
-            <input type="submit" value="Upload">
-        </form>
-        <a href="/">Back</a>
-    </body>
-    </html>
-    """
 
 if __name__ == '__main__':
     print("Running Flask app on port 8080")
