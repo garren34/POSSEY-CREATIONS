@@ -27,19 +27,23 @@ def home():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
     
-    # Fetch active jobs from Supabase
-    response = supabase.table('jobs').select('id', 'job_number').eq('archived', 0).order('id').execute()
-    jobs = response.data  # Data is a list of dictionaries
+    # Fetch active jobs with bay and part_type
+    response = supabase.table('jobs').select('id', 'job_number', 'bay', 'part_type').eq('archived', 0).order('id').execute()
+    jobs = response.data
     
     job_html = ''
     for job in jobs:
-        job_html += f'<li><a href="/add_job_details?job_id={job["id"]}">{job["job_number"]}</a> ' \
-                    f'<form method="POST" action="/archive_job" style="display:inline;">' \
-                    f'<input type="hidden" name="job_id" value="{job["id"]}">' \
-                    f'<input type="submit" value="Archive" class="archive-btn"></form> ' \
-                    f'<form method="POST" action="/delete_job" style="display:inline;">' \
-                    f'<input type="hidden" name="job_id" value="{job["id"]}">' \
-                    f'<input type="submit" value="Delete" class="delete-btn"></form></li>'
+        bay_display = f"Bay {job['bay']}" if job['bay'] else "Bay N/A"
+        part_type_display = job['part_type'] if job['part_type'] else "Part Type N/A"
+        job_html += (
+            f'<li><a href="/add_job_details?job_id={job["id"]}">{job["job_number"]} - {bay_display} - {part_type_display}</a> '
+            f'<form method="POST" action="/archive_job" style="display:inline;">'
+            f'<input type="hidden" name="job_id" value="{job["id"]}">'
+            f'<input type="submit" value="Archive" class="archive-btn"></form> '
+            f'<form method="POST" action="/delete_job" style="display:inline;">'
+            f'<input type="hidden" name="job_id" value="{job["id"]}">'
+            f'<input type="submit" value="Delete" class="delete-btn"></form></li>'
+        )
     
     return f"""
     <html>
@@ -93,77 +97,34 @@ def home():
     </html>
     """
 
-@app.route('/staff')
-def staff():
-    if 'logged_in' not in session:
-        return redirect(url_for('login'))
-    
-    # Fetch staff list from Supabase
-    response = supabase.table('staff').select('name').execute()
-    staff_list = [staff['name'] for staff in response.data]
-    
-    staff_html = ''
-    for staff in staff_list:
-        staff_html += f'<li>{staff} ' \
-                      f'<form method="POST" action="/delete_staff" style="display:inline;">' \
-                      f'<input type="hidden" name="staff_name" value="{staff}">' \
-                      f'<input type="submit" value="Remove" class="delete-btn"></form></li>'
-    
-    return f"""
-    <html>
-    <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link rel="manifest" href="/manifest.json">
-        <script>
-          if ('serviceWorker' in navigator) {{
-            navigator.serviceWorker.register('/static/sw.js')
-              .then(() => console.log('Service Worker registered'));
-          }}
-        </script>
-        <style>
-            body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
-            h1 {{ color: #2c3e50; }}
-            h2 {{ color: #34495e; }}
-            input[type="text"] {{ padding: 5px; margin: 5px; }}
-            input[type="submit"] {{ background-color: #3498db; color: white; padding: 8px; border: none; border-radius: 5px; cursor: pointer; }}
-            input[type="submit"]:hover {{ background-color: #2980b9; }}
-            .delete-btn {{ background-color: #e74c3c; }}
-            .delete-btn:hover {{ background-color: #c0392b; }}
-            ul {{ list-style-type: none; padding: 0; }}
-            li {{ margin: 5px 0; }}
-            .logout {{ position: absolute; top: 20px; right: 20px; }}
-        </style>
-    </head>
-    <body>
-        <h1>Staff Management</h1>
-        <a href="/logout" class="logout">Logout</a>
-        <a href="/">Back to Jobs</a>
-        <form method="POST" action="/add_staff">
-            <input type="text" name="staff_name" placeholder="Enter staff name" required>
-            <input type="submit" value="Add Staff">
-        </form>
-        <h2>Staff List</h2>
-        <ul>{staff_html}</ul>
-    </body>
-    </html>
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        if username in users and users[username] == password:
+            session['logged_in'] = True
+            return redirect(url_for('home'))
+        return "Invalid credentials. Try again."
+    return """
+    <form method="POST">
+        Username: <input type="text" name="username"><br>
+        Password: <input type="password" name="password"><br>
+        <input type="submit" value="Login">
+    </form>
     """
+
+@app.route('/logout')
+def logout():
+    session.pop('logged_in', None)
+    return redirect(url_for('login'))
 
 @app.route('/add_job', methods=['POST'])
 def add_job():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
     job_number = request.form['job_number']
-    
-    try:
-        # Insert new job into Supabase
-        supabase.table('jobs').insert({'job_number': job_number}).execute()
-    except Exception as e:
-        # Handle duplicate job_number error
-        if 'duplicate key' in str(e):
-            pass  # Job number exists, proceed silently
-        else:
-            raise e
-    
+    supabase.table('jobs').insert({'job_number': job_number}).execute()
     return redirect(url_for('home'))
 
 @app.route('/add_job_details', methods=['GET', 'POST'])
@@ -172,7 +133,7 @@ def add_job_details():
         return redirect(url_for('login'))
     job_id = request.args.get('job_id')
     
-    # Fetch job details from Supabase
+    # Fetch job details
     job_response = supabase.table('jobs').select('*').eq('id', job_id).execute()
     job = job_response.data[0] if job_response.data else None
     
@@ -192,30 +153,39 @@ def add_job_details():
     est_time = job['estimated_time'] or ''
     act_time = job['actual_time'] or ''
     issues = job['issues'] or ''
+    diameter = job['diameter'] or ''
+    part_type = job['part_type'] or ''
     
-    staff_options = ''.join(f'<input type="checkbox" name="staff" value="{staff}" {"checked" if staff in current_staff else ""}> {staff}<br>' 
-                            for staff in staff_list)
+    staff_options = ''.join(
+        f'<input type="checkbox" name="staff" value="{staff}" {"checked" if staff in current_staff else ""}> {staff}<br>'
+        for staff in staff_list
+    )
     
     if request.method == 'POST':
         bay = int(request.form['bay']) if request.form['bay'] else None
-        est_time = int(request.form['estimated_time']) if request.form['estimated_time'] else None
-        act_time = int(request.form['actual_time']) if request.form['actual_time'] else None
+        est_time = float(request.form['estimated_time']) if request.form['estimated_time'] else None
+        act_time = float(request.form['actual_time']) if request.form['actual_time'] else None
         issues = request.form['issues'] or 'None'
-        staff_names = request.form.getlist('staff')
+        diameter_input = request.form['diameter']
+        diameter = float(diameter_input) if diameter_input else None
+        # Enforce diameter range: 1 to 14 feet
+        if diameter is not None and (diameter < 1 or diameter > 14):
+            return "Diameter must be between 1 and 14 feet. <a href='/add_job_details?job_id=" + job_id + "'>Try again</a>"
+        part_type = request.form['part_type'] or None
         
-        # Update job details in Supabase
+        # Update job details
         supabase.table('jobs').update({
             'bay': bay,
             'estimated_time': est_time,
             'actual_time': act_time,
-            'issues': issues
+            'issues': issues,
+            'diameter': diameter,
+            'part_type': part_type
         }).eq('id', job_id).execute()
         
-        # Delete existing staff assignments
+        # Update staff assignments
         supabase.table('job_staff').delete().eq('job_id', job_id).execute()
-        
-        # Insert new staff assignments
-        for staff in staff_names:
+        for staff in request.form.getlist('staff'):
             supabase.table('job_staff').insert({'job_id': job_id, 'staff_name': staff}).execute()
         
         return redirect(url_for('home'))
@@ -244,8 +214,10 @@ def add_job_details():
         <form method="POST">
             <label>Select Staff:</label><br>{staff_options}
             <input type="number" name="bay" value="{bay}" placeholder="Bay (1-10)" min="1" max="10">
-            <input type="number" name="estimated_time" value="{est_time}" placeholder="Estimated Time (mins)">
-            <input type="number" name="actual_time" value="{act_time}" placeholder="Actual Time (mins)">
+            <input type="number" name="diameter" value="{diameter}" placeholder="Diameter (1-14 feet)" step="0.5" min="1" max="14">
+            <input type="text" name="part_type" value="{part_type}" placeholder="Part Type">
+            <input type="number" name="estimated_time" value="{est_time}" placeholder="Estimated Time (hours)" step="0.01">
+            <input type="number" name="actual_time" value="{act_time}" placeholder="Actual Time (hours)" step="0.01">
             <input type="text" name="issues" value="{issues}" placeholder="Issues (optional)">
             <input type="submit" value="Save Details">
         </form>
@@ -260,7 +232,6 @@ def job_details():
         return redirect(url_for('login'))
     job_number = request.args.get('job_number')
     
-    # Fetch job details from Supabase
     job_response = supabase.table('jobs').select('*').eq('job_number', job_number).execute()
     job = job_response.data[0] if job_response.data else None
     
@@ -273,8 +244,9 @@ def job_details():
     act_time = job['actual_time']
     issues = job['issues']
     archived = job['archived']
+    diameter = job['diameter']
+    part_type = job['part_type']
     
-    # Fetch staff for this job
     staff_response = supabase.table('job_staff').select('staff_name').eq('job_id', job_id).execute()
     staff_list = [staff['staff_name'] for staff in staff_response.data]
     
@@ -283,13 +255,10 @@ def job_details():
     else:
         staff_count = len(staff_list)
         hours_per_staff = act_time / staff_count if staff_count > 0 and act_time else 0
-        staff_html = '<ul>'
-        for staff in staff_list:
-            staff_html += f'<li>{staff}: {hours_per_staff:.2f} mins</li>'
-        staff_html += '</ul>'
+        staff_html = '<ul>' + ''.join(f'<li>{staff}: {hours_per_staff:.2f} hours</li>' for staff in staff_list) + '</ul>'
     
     time_diff = act_time - est_time if est_time and act_time else 0
-    diff_text = f"{time_diff} mins {'over' if time_diff > 0 else 'under'}" if time_diff != 0 else "on time"
+    diff_text = f"{time_diff} hours {'over' if time_diff > 0 else 'under'}" if time_diff != 0 else "on time"
     status = "Archived" if archived else "Active"
     
     return f"""
@@ -319,12 +288,68 @@ def job_details():
         <h2>Job Information</h2>
         <p>Bay: {bay or 'Not set'}</p>
         <p>Status: {status}</p>
-        <p>Estimated Time: {est_time or 'Not set'} mins</p>
-        <p>Actual Time: {act_time or 'Not set'} mins</p>
+        <p>Diameter: {diameter or 'Not set'} feet</p>
+        <p>Part Type: {part_type or 'Not set'}</p>
+        <p>Estimated Time: {est_time or 'Not set'} hours</p>
+        <p>Actual Time: {act_time or 'Not set'} hours</p>
         <p>Time Difference: {diff_text}</p>
         <p>Issues: {issues or 'None'}</p>
         <h2>Staff</h2>
         {staff_html}
+    </body>
+    </html>
+    """
+
+@app.route('/delete_job', methods=['POST'])
+def delete_job():
+    if 'logged_in' not in session:
+        return redirect(url_for('login'))
+    job_id = request.form['job_id']
+    supabase.table('jobs').delete().eq('id', job_id).execute()
+    supabase.table('job_staff').delete().eq('job_id', job_id).execute()
+    return redirect(url_for('home'))
+
+@app.route('/archive_job', methods=['POST'])
+def archive_job():
+    if 'logged_in' not in session:
+        return redirect(url_for('login'))
+    job_id = request.form['job_id']
+    supabase.table('jobs').update({'archived': 1}).eq('id', job_id).execute()
+    return redirect(url_for('home'))
+
+@app.route('/archive')
+def archive():
+    if 'logged_in' not in session:
+        return redirect(url_for('login'))
+    
+    response = supabase.table('jobs').select('*').eq('archived', 1).order('id').execute()
+    jobs = response.data
+    
+    job_html = ''
+    for job in jobs:
+        time_diff = job['actual_time'] - job['estimated_time'] if job['estimated_time'] and job['actual_time'] else 0
+        diff_text = f" ({time_diff} hours {'over' if time_diff > 0 else 'under'})" if time_diff != 0 else " (on time)"
+        job_html += (
+            f'<li>Job #{job["job_number"]} - '
+            f'Est. {job["estimated_time"] or "Not set"} hours, '
+            f'Act. {job["actual_time"] or "Not set"} hours{diff_text}</li>'
+        )
+    
+    return f"""
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
+            h1 {{ color: #2c3e50; }}
+            ul {{ list-style-type: none; padding: 0; }}
+            li {{ margin: 5px 0; }}
+        </style>
+    </head>
+    <body>
+        <h1>Archived Jobs</h1>
+        <a href="/">Back to Active Jobs</a>
+        <ul>{job_html}</ul>
     </body>
     </html>
     """
@@ -334,217 +359,78 @@ def job_times():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
     
-    # Fetch active jobs from Supabase
-    jobs_response = supabase.table('jobs').select('id', 'bay', 'job_number', 'estimated_time', 'actual_time').eq('archived', 0).execute()
-    jobs = jobs_response.data
-    
-    job_staff = {}
-    for job in jobs:
-        staff_response = supabase.table('job_staff').select('staff_name').eq('job_id', job['id']).execute()
-        job_staff[job['id']] = [staff['staff_name'] for staff in staff_response.data]
+    response = supabase.table('jobs').select('*').eq('archived', 0).order('id').execute()
+    jobs = response.data
     
     job_html = ''
     for job in jobs:
         time_diff = job['actual_time'] - job['estimated_time'] if job['estimated_time'] and job['actual_time'] else 0
-        diff_text = f" ({time_diff} mins {'over' if time_diff > 0 else 'under'})" if time_diff != 0 else " (on time)"
-        staff_names = ', '.join(job_staff.get(job['id'], []))
-        job_html += f'<li>Staff: {staff_names} | Bay {job["bay"] or "Not set"}, Job #{job["job_number"]}, Est. {job["estimated_time"] or "Not set"} mins, Act. {job["actual_time"] or "Not set"} mins{diff_text} ' \
-                    f'<form method="POST" action="/delete_job" style="display:inline;">' \
-                    f'<input type="hidden" name="job_id" value="{job["id"]}">' \
-                    f'<input type="submit" value="Delete" class="delete-btn"></form></li>'
+        diff_text = f" ({time_diff} hours {'over' if time_diff > 0 else 'under'})" if time_diff != 0 else " (on time)"
+        job_html += (
+            f'<li>Job #{job["job_number"]} - '
+            f'Est. {job["estimated_time"] or "Not set"} hours, '
+            f'Act. {job["actual_time"] or "Not set"} hours{diff_text}</li>'
+        )
     
     return f"""
     <html>
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link rel="manifest" href="/manifest.json">
-        <script>
-          if ('serviceWorker' in navigator) {{
-            navigator.serviceWorker.register('/static/sw.js')
-              .then(() => console.log('Service Worker registered'));
-          }}
-        </script>
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
             ul {{ list-style-type: none; padding: 0; }}
             li {{ margin: 5px 0; }}
-            .logout {{ position: absolute; top: 20px; right: 20px; }}
-            .delete-btn {{ background-color: #e74c3c; color: white; padding: 8px; border: none; border-radius: 5px; cursor: pointer; }}
-            .delete-btn:hover {{ background-color: #c0392b; }}
         </style>
     </head>
     <body>
         <h1>Job Times</h1>
-        <a href="/logout" class="logout">Logout</a>
         <a href="/">Back to Active Jobs</a>
         <ul>{job_html}</ul>
     </body>
     </html>
     """
 
-@app.route('/archive')
-def archive():
+@app.route('/staff', methods=['GET', 'POST'])
+def staff():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
     
-    # Fetch archived jobs from Supabase
-    jobs_response = supabase.table('jobs').select('id', 'bay', 'job_number', 'estimated_time', 'actual_time', 'issues').eq('archived', 1).execute()
-    jobs = jobs_response.data
+    if request.method == 'POST':
+        staff_name = request.form['staff_name']
+        supabase.table('staff').insert({'name': staff_name}).execute()
+        return redirect(url_for('staff'))
     
-    job_staff = {}
-    for job in jobs:
-        staff_response = supabase.table('job_staff').select('staff_name').eq('job_id', job['id']).execute()
-        job_staff[job['id']] = [staff['staff_name'] for staff in staff_response.data]
-    
-    job_html = ''
-    for job in jobs:
-        time_diff = job['actual_time'] - job['estimated_time'] if job['estimated_time'] and job['actual_time'] else 0
-        diff_text = f" ({time_diff} mins {'over' if time_diff > 0 else 'under'})" if time_diff != 0 else " (on time)"
-        staff_names = ', '.join(job_staff.get(job['id'], []))
-        job_html += f'<li>Staff: {staff_names} | Bay {job["bay"] or "Not set"}, Job #{job["job_number"]}, Est. {job["estimated_time"] or "Not set"} mins, Act. {job["actual_time"] or "Not set"} mins{diff_text}, Issues: {job["issues"]} ' \
-                    f'<form method="POST" action="/delete_job" style="display:inline;">' \
-                    f'<input type="hidden" name="job_id" value="{job["id"]}">' \
-                    f'<input type="submit" value="Delete" class="delete-btn"></form></li>'
+    response = supabase.table('staff').select('name').execute()
+    staff_list = [staff['name'] for staff in response.data]
+    staff_html = ''.join(f'<li>{staff}</li>' for staff in staff_list)
     
     return f"""
     <html>
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link rel="manifest" href="/manifest.json">
-        <script>
-          if ('serviceWorker' in navigator) {{
-            navigator.serviceWorker.register('/static/sw.js')
-              .then(() => console.log('Service Worker registered'));
-          }}
-        </script>
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
-            h2 {{ color: #34495e; }}
-            input[type="submit"] {{ background-color: #e74c3c; color: white; padding: 8px; border: none; border-radius: 5px; cursor: pointer; }}
-            input[type="submit"]:hover {{ background-color: #c0392b; }}
-            ul {{ list-style-type: none; padding: 0; }}
-            li {{ margin: 5px 0; }}
-            .logout {{ position: absolute; top: 20px; right: 20px; }}
-        </style>
-    </head>
-    <body>
-        <h1>Archived Jobs</h1>
-        <a href="/logout" class="logout">Logout</a>
-        <a href="/">Back to Active Jobs</a>
-        <ul>{job_html}</ul>
-    </body>
-    </html>
-    """
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        if username in users and users[username] == password:
-            session['logged_in'] = True
-            return redirect(url_for('home'))
-        return "Wrong username or password. <a href='/login'>Try again</a>"
-    return """
-    <html>
-    <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link rel="manifest" href="/manifest.json">
-        <script>
-          if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/static/sw.js')
-              .then(() => console.log('Service Worker registered'));
-          }
-        </script>
-        <style>
-            body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; text-align: center; }}
-            input[type="text"], input[type="password"] {{ padding: 5px; margin: 5px; }}
+            input[type="text"] {{ padding: 5px; margin: 5px; }}
             input[type="submit"] {{ background-color: #3498db; color: white; padding: 8px; border: none; border-radius: 5px; cursor: pointer; }}
             input[type="submit"]:hover {{ background-color: #2980b9; }}
+            ul {{ list-style-type: none; padding: 0; }}
+            li {{ margin: 5px 0; }}
         </style>
     </head>
     <body>
-        <h1>Login</h1>
+        <h1>Manage Staff</h1>
+        <a href="/">Back to Active Jobs</a>
         <form method="POST">
-            <input type="text" name="username" placeholder="Username" required><br>
-            <input type="password" name="password" placeholder="Password" required><br>
-            <input type="submit" value="Login">
+            <input type="text" name="staff_name" placeholder="Add New Staff" required>
+            <input type="submit" value="Add">
         </form>
+        <h2>Current Staff</h2>
+        <ul>{staff_html}</ul>
     </body>
     </html>
     """
-
-@app.route('/logout')
-def logout():
-    session.pop('logged_in', None)
-    return redirect(url_for('login'))
-
-@app.route('/add_staff', methods=['POST'])
-def add_staff():
-    if 'logged_in' not in session:
-        return redirect(url_for('login'))
-    name = request.form['staff_name']
-    
-    try:
-        # Insert new staff into Supabase
-        supabase.table('staff').insert({'name': name}).execute()
-    except Exception as e:
-        # Handle duplicate staff name error
-        if 'duplicate key' in str(e):
-            pass  # Staff name exists, proceed silently
-        else:
-            raise e
-    
-    return redirect(url_for('staff'))
-
-@app.route('/delete_staff', methods=['POST'])
-def delete_staff():
-    if 'logged_in' not in session:
-        return redirect(url_for('login'))
-    staff_name = request.form['staff_name']
-    
-    # Check if staff is assigned to any jobs
-    job_staff_response = supabase.table('job_staff').select('job_id').eq('staff_name', staff_name).execute()
-    if job_staff_response.data:
-        # Staff is assigned to jobs, do not delete
-        pass
-    else:
-        # Delete staff from Supabase
-        supabase.table('staff').delete().eq('name', staff_name).execute()
-    
-    return redirect(url_for('staff'))
-
-@app.route('/archive_job', methods=['POST'])
-def archive_job():
-    if 'logged_in' not in session:
-        return redirect(url_for('login'))
-    job_id = request.form['job_id']
-    
-    # Archive job in Supabase
-    supabase.table('jobs').update({'archived': 1}).eq('id', job_id).execute()
-    
-    return redirect(url_for('home'))
-
-@app.route('/delete_job', methods=['POST'])
-def delete_job():
-    if 'logged_in' not in session:
-        return redirect(url_for('login'))
-    job_id = request.form['job_id']
-    
-    # Delete job staff assignments
-    supabase.table('job_staff').delete().eq('job_id', job_id).execute()
-    
-    # Delete job from Supabase
-    supabase.table('jobs').delete().eq('id', job_id).execute()
-    
-    referrer = request.referrer or url_for('home')
-    if 'job_times' in referrer:
-        return redirect(url_for('job_times'))
-    elif 'archive' in referrer:
-        return redirect(url_for('archive'))
-    return redirect(url_for('home'))
 
 if __name__ == '__main__':
     print("Running Flask app on port 8080")
