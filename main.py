@@ -5,6 +5,15 @@ app = Flask(__name__)
 app.secret_key = 'mysecret123'
 users = {'POSSEY': 'Guns4Liberaltears'}
 
+from supabase import create_client, Client
+import os
+
+# Load Supabase credentials from environment variables
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_KEY = os.getenv('SUPABASE_KEY')
+
+# Initialize Supabase client
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def init_db():
     try:
         print("Initializing database...")
