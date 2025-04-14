@@ -176,13 +176,13 @@ def delete_staff():
         return redirect(url_for('login'))
     staff_name = request.form['staff_name']
     
-    # Check if staff is assigned to any jobs
-    job_staff_response = supabase.table('job_staff').select('job_id').eq('staff_name', staff_name).execute()
-    if job_staff_response.data:
-        return f"Cannot delete {staff_name} because they are assigned to jobs. <a href='/staff'>Back</a>"
-    
-    # Delete staff from Supabase
-    supabase.table('staff').delete().eq('name', staff_name).execute()
+    try:
+        # Delete staff's job assignments
+        supabase.table('job_staff').delete().eq('staff_name', staff_name).execute()
+        # Delete staff from Supabase
+        supabase.table('staff').delete().eq('name', staff_name).execute()
+    except Exception as e:
+        return f"Error deleting staff: {str(e)}. <a href='/staff'>Back</a>"
     
     return redirect(url_for('staff'))
 
