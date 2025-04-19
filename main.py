@@ -28,22 +28,36 @@ def home():
         return redirect(url_for('login'))
     
     # Fetch active jobs with bay and part_type
-    response = supabase.table('jobs').select('id', 'job_number', 'bay', 'part_type').eq('archived', 0).order('id').execute()
+    response = supabase.table('jobs').select('id', 'job_number', 'bay', 'part_type').eq('archived', 0).order('job_number').execute()
     jobs = response.data
     
-    job_html = ''
+    # Group jobs by bay (1 to 10)
+    bay_jobs = {i: [] for i in range(1, 11)}  # Initialize all 10 bays
     for job in jobs:
-        bay_display = f"Bay {job['bay']}" if job['bay'] else "Bay N/A"
-        part_type_display = job['part_type'] if job['part_type'] else "Part Type N/A"
-        job_html += (
-            f'<li><a href="/add_job_details?job_id={job["id"]}">{job["job_number"]} - {bay_display} - {part_type_display}</a> '
-            f'<form method="POST" action="/archive_job" style="display:inline;">'
-            f'<input type="hidden" name="job_id" value="{job["id"]}">'
-            f'<input type="submit" value="Archive" class="archive-btn"></form> '
-            f'<form method="POST" action="/delete_job" style="display:inline;">'
-            f'<input type="hidden" name="job_id" value="{job["id"]}">'
-            f'<input type="submit" value="Delete" class="delete-btn"></form></li>'
-        )
+        bay = job['bay'] if job['bay'] is not None else None
+        if bay in bay_jobs:
+            bay_jobs[bay].append(job)
+    
+    # Generate HTML for each bay
+    bay_html = ''
+    for bay in range(1, 11):
+        jobs_in_bay = bay_jobs[bay]
+        if not jobs_in_bay:
+            bay_html += f'<h3>Bay {bay}</h3><ul><li>No jobs</li></ul>'
+        else:
+            job_list = ''
+            for job in jobs_in_bay:
+                part_type_display = job['part_type'] if job['part_type'] else "Part Type N/A"
+                job_list += (
+                    f'<li><a href="/add_job_details?job_id={job["id"]}">{job["job_number"]} - {part_type_display}</a> '
+                    f'<form method="POST" action="/archive_job" style="display:inline;">'
+                    f'<input type="hidden" name="job_id" value="{job["id"]}">'
+                    f'<input type="submit" value="Archive" class="archive-btn"></form> '
+                    f'<form method="POST" action="/delete_job" style="display:inline;">'
+                    f'<input type="hidden" name="job_id" value="{job["id"]}">'
+                    f'<input type="submit" value="Delete" class="delete-btn"></form></li>'
+                )
+            bay_html += f'<h3>Bay {bay}</h3><ul>{job_list}</ul>'
     
     return f"""
     <html>
@@ -60,6 +74,7 @@ def home():
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
             h2 {{ color: #34495e; }}
+            h3 {{ color: #2c3e50; margin-top: 20px; }}
             input[type="text"] {{ padding: 5px; margin: 5px; }}
             input[type="submit"] {{ background-color: #3498db; color: white; padding: 8px; border: none; border-radius: 5px; cursor: pointer; }}
             input[type="submit"]:hover {{ background-color: #2980b9; }}
@@ -67,7 +82,7 @@ def home():
             .archive-btn:hover {{ background-color: #8e44ad; }}
             .delete-btn {{ background-color: #e74c3c; }}
             .delete-btn:hover {{ background-color: #c0392b; }}
-            ul {{ list-style-type: none; padding: 0; }}
+            ul {{ list-style-type: none; padding-left: 20px; }}
             li {{ margin: 5px 0; }}
             .logout {{ position: absolute; top: 20px; right: 20px; }}
             .nav-buttons {{ margin: 10px 0; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }}
@@ -91,8 +106,8 @@ def home():
             <button onclick="window.location.href='/archive'">View Archive</button>
             <button onclick="window.location.href='/job_times'">View Job Times</button>
         </div>
-        <h2>Active Jobs (Click to Add/Edit Details)</h2>
-        <ul>{job_html}</ul>
+        <h2>Active Jobs by Bay</h2>
+        {bay_html}
     </body>
     </html>
     """
@@ -251,7 +266,7 @@ def add_job_details():
         issues_input = request.form['issues']
         issues_list = [issue.strip() for issue in issues_input.split('\n') if issue.strip()]
         
-        # Update job details in Supabase (without issues)
+        # Update job details in Supabase
         supabase.table('jobs').update({
             'bay': bay,
             'estimated_time': est_time,
