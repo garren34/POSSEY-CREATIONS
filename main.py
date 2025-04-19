@@ -211,7 +211,7 @@ def add_job_details():
     job_id = request.args.get('job_id')
     
     # Fetch job details from Supabase
-    job_response = supabase.table('jobs').select('*').eq('id', job_id).execute()
+    job_response = supabase.table('jobs').select('job_number', 'bay', 'estimated_time', 'actual_time', 'diameter', 'part_type').eq('id', job_id).execute()
     job = job_response.data[0] if job_response.data else None
     
     # Fetch all staff
@@ -222,6 +222,10 @@ def add_job_details():
     current_staff_response = supabase.table('job_staff').select('staff_name').eq('job_id', job_id).execute()
     current_staff = [staff['staff_name'] for staff in current_staff_response.data]
     
+    # Fetch issues for this job
+    issues_response = supabase.table('job_issues').select('issue').eq('job_id', job_id).execute()
+    issues = '\n'.join([issue['issue'] for issue in issues_response.data])
+    
     if not job:
         return "Job not found. <a href='/'>Back</a>"
     
@@ -229,7 +233,6 @@ def add_job_details():
     bay = job['bay'] or ''
     est_time = job['estimated_time'] or ''
     act_time = job['actual_time'] or ''
-    issues = job['issues'] or ''
     diameter = job['diameter'] or ''
     part_type = job['part_type'] or ''
     
@@ -240,19 +243,19 @@ def add_job_details():
         bay = int(request.form['bay']) if request.form['bay'] else None
         est_time = float(request.form['estimated_time']) if request.form['estimated_time'] else None
         act_time = float(request.form['actual_time']) if request.form['actual_time'] else None
-        issues = request.form['issues'] or 'None'
         diameter = float(request.form['diameter']) if request.form['diameter'] else None
         # Enforce diameter range: 1 to 14 feet
         if diameter is not None and (diameter < 1 or diameter > 14):
             return f"Diameter must be between 1 and 14 feet. <a href='/add_job_details?job_id={job_id}'>Try again</a>"
         part_type = request.form['part_type'] or None
+        issues_input = request.form['issues']
+        issues_list = [issue.strip() for issue in issues_input.split('\n') if issue.strip()]
         
-        # Update job details in Supabase
+        # Update job details in Supabase (without issues)
         supabase.table('jobs').update({
             'bay': bay,
             'estimated_time': est_time,
             'actual_time': act_time,
-            'issues': issues,
             'diameter': diameter,
             'part_type': part_type
         }).eq('id', job_id).execute()
@@ -263,6 +266,13 @@ def add_job_details():
         # Insert new staff assignments
         for staff in request.form.getlist('staff'):
             supabase.table('job_staff').insert({'job_id': job_id, 'staff_name': staff}).execute()
+        
+        # Delete existing issues
+        supabase.table('job_issues').delete().eq('job_id', job_id).execute()
+        
+        # Insert new issues
+        for issue in issues_list:
+            supabase.table('job_issues').insert({'job_id': job_id, 'issue': issue}).execute()
         
         return redirect(url_for('home'))
     
@@ -280,9 +290,10 @@ def add_job_details():
         <style>
             body {{ font-family: Arial, sans-serif; background-color: #f0f4f8; padding: 20px; }}
             h1 {{ color: #2c3e50; }}
-            input[type="text"], input[type="number"] {{ padding: 5px; margin: 5px; }}
+            input[type="text"], input[type="number"], textarea {{ padding: 5px; margin: 5px; }}
             input[type="submit"] {{ background-color: #3498db; color: white; padding: 8px; border: none; border-radius: 5px; cursor: pointer; }}
             input[type="submit"]:hover {{ background-color: #2980b9; }}
+            textarea {{ width: 300px; height: 100px; }}
         </style>
     </head>
     <body>
@@ -294,7 +305,7 @@ def add_job_details():
             <input type="text" name="part_type" value="{part_type}" placeholder="Part Type">
             <input type="number" name="estimated_time" value="{est_time}" placeholder="Estimated Time (hours)" step="0.01">
             <input type="number" name="actual_time" value="{act_time}" placeholder="Actual Time (hours)" step="0.01">
-            <input type="text" name="issues" value="{issues}" placeholder="Issues (optional)">
+            <textarea name="issues" placeholder="Enter issues, one per line">{issues}</textarea>
             <input type="submit" value="Save Details">
         </form>
         <a href="/">Back</a>
@@ -319,7 +330,6 @@ def job_details():
     bay = job['bay']
     est_time = job['estimated_time']
     act_time = job['actual_time']
-    issues = job['issues']
     archived = job['archived']
     diameter = job['diameter']
     part_type = job['part_type']
@@ -327,6 +337,10 @@ def job_details():
     # Fetch staff for this job
     staff_response = supabase.table('job_staff').select('staff_name').eq('job_id', job_id).execute()
     staff_list = [staff['staff_name'] for staff in staff_response.data]
+    
+    # Fetch issues for this job
+    issues_response = supabase.table('job_issues').select('issue').eq('job_id', job_id).execute()
+    issues_list = [issue['issue'] for issue in issues_response.data]
     
     if not staff_list:
         staff_html = "No staff assigned."
@@ -341,6 +355,8 @@ def job_details():
     time_diff = act_time - est_time if est_time and act_time else 0
     diff_text = f"{time_diff} hours {'over' if time_diff > 0 else 'under'}" if time_diff != 0 else "on time"
     status = "Archived" if archived else "Active"
+    
+    issues_html = '<ul>' + ''.join(f'<li>{issue}</li>' for issue in issues_list) + '</ul>' if issues_list else 'No issues'
     
     return f"""
     <html>
@@ -374,7 +390,8 @@ def job_details():
         <p>Estimated Time: {est_time or 'Not set'} hours</p>
         <p>Actual Time: {act_time or 'Not set'} hours</p>
         <p>Time Difference: {diff_text}</p>
-        <p>Issues: {issues or 'None'}</p>
+        <h2>Issues</h2>
+        {issues_html}
         <h2>Staff</h2>
         {staff_html}
     </body>
@@ -441,7 +458,7 @@ def archive():
         return redirect(url_for('login'))
     
     # Fetch archived jobs from Supabase
-    jobs_response = supabase.table('jobs').select('id', 'bay', 'job_number', 'estimated_time', 'actual_time', 'issues', 'part_type', 'diameter').eq('archived', 1).execute()
+    jobs_response = supabase.table('jobs').select('id', 'bay', 'job_number', 'estimated_time', 'actual_time', 'part_type', 'diameter').eq('archived', 1).execute()
     jobs = jobs_response.data
     
     job_staff = {}
@@ -454,7 +471,7 @@ def archive():
         time_diff = job['actual_time'] - job['estimated_time'] if job['estimated_time'] and job['actual_time'] else 0
         diff_text = f" ({time_diff} hours {'over' if time_diff > 0 else 'under'})" if time_diff != 0 else " (on time)"
         staff_names = ', '.join(job_staff.get(job['id'], []))
-        job_html += f'<li>Staff: {staff_names} | Bay {job["bay"] or "Not set"}, Job #{job["job_number"]}, Part Type: {job["part_type"] or "Not set"}, Diameter: {job["diameter"] or "Not set"} feet, Est. {job["estimated_time"] or "Not set"} hours, Act. {job["actual_time"] or "Not set"} hours{diff_text}, Issues: {job["issues"]} ' \
+        job_html += f'<li>Staff: {staff_names} | Bay {job["bay"] or "Not set"}, Job #{job["job_number"]}, Part Type: {job["part_type"] or "Not set"}, Diameter: {job["diameter"] or "Not set"} feet, Est. {job["estimated_time"] or "Not set"} hours, Act. {job["actual_time"] or "Not set"} hours{diff_text} ' \
                     f'<form method="POST" action="/delete_job" style="display:inline;">' \
                     f'<input type="hidden" name="job_id" value="{job["id"]}">' \
                     f'<input type="submit" value="Delete" class="delete-btn"></form></li>'
@@ -554,7 +571,7 @@ def delete_job():
         # Delete job staff assignments first
         supabase.table('job_staff').delete().eq('job_id', job_id).execute()
         
-        # Delete job from Supabase
+        # Delete job from Supabase (issues will be deleted automatically due to ON DELETE CASCADE)
         supabase.table('jobs').delete().eq('id', job_id).execute()
     except Exception as e:
         return f"Error deleting job: {str(e)}. <a href='/'>Back</a>"
