@@ -208,8 +208,8 @@ def add_job():
     job_number = request.form['job_number']
     
     try:
-        # Insert new job into Supabase
-        supabase.table('jobs').insert({'job_number': job_number}).execute()
+        # Insert new job with archived explicitly set to 0
+        supabase.table('jobs').insert({'job_number': job_number, 'archived': 0}).execute()
     except Exception as e:
         # Handle duplicate job_number error
         if 'duplicate key' in str(e):
