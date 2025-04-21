@@ -209,14 +209,20 @@ def add_job():
     
     try:
         # Insert new job with archived explicitly set to 0
-        supabase.table('jobs').insert({'job_number': job_number, 'archived': 0}).execute()
+        response = supabase.table('jobs').insert({'job_number': job_number, 'archived': 0}).execute()
+        # Get the new job's id from the response
+        job_id = response.data[0]['id']
+        # Redirect to the add_job_details page for this job
+        return redirect(url_for('add_job_details', job_id=job_id))
     except Exception as e:
         # Handle duplicate job_number error
         if 'duplicate key' in str(e):
-            pass  # Job number exists, proceed silently
+            # For now, silently proceed; could add error message later
+            pass
         else:
             raise e
     
+    # If there’s an error, go back to home
     return redirect(url_for('home'))
 
 @app.route('/add_job_details', methods=['GET', 'POST'])
